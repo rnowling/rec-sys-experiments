@@ -50,48 +50,6 @@ def read_ratings(flname):
 
     return ratings_matrix
 
-
-def train_and_score(metric, training, testing, ks):
-    print "Training and scoring"
-    scores = []
-    knn = NearestNeighbors(metric=metric, algorithm="brute")
-    knn.fit(training)
-    for k in ks:
-        print "Evaluating for", k, "neighbors"
-        neighbor_indices = knn.kneighbors(testing,
-                                          n_neighbors=k,
-                                          return_distance=False)
-
-        all_predicted_scores = []
-        all_labels = []
-        for user_id in xrange(testing.shape[0]):
-            user_row = testing[user_id, :]
-            
-            _, interaction_indices = user_row.nonzero()
-            interacted = set(interaction_indices)
-            non_interacted = set(xrange(testing.shape[1])) - interacted
-
-            n_samples = min(len(non_interacted), len(interacted))
-            sampled_interacted = random.sample(interacted, n_samples)
-            sampled_non_interacted = random.sample(non_interacted, n_samples)
-
-            indices = list(sampled_interacted)
-            indices.extend(sampled_non_interacted)
-            labels = [1] * n_samples
-            labels.extend([0] * n_samples)
-            
-            neighbors = training[neighbor_indices[user_id, :], :]
-            predicted_scores = neighbors.mean(axis=0)
-            for idx in indices:
-                all_predicted_scores.append(predicted_scores[0, idx])
-            all_labels.extend(labels)
-
-        print len(all_labels), len(all_predicted_scores)
-
-        auc = roc_auc_score(all_labels, all_predicted_scores)
-
-        print "k", k, "AUC", auc
-
 def parseargs():
     parser = argparse.ArgumentParser()
 
@@ -100,17 +58,10 @@ def parseargs():
                         required=True,
                         help="Ratings file")
     
-    parser.add_argument("--metric",
-                        type=str,
-                        choices=["euclidean", "cosine"],
-                        default="euclidean",
-                        help="Distance metric")
-
     parser.add_argument("--k",
                         type=int,
                         required=True,
                         help="Number of neigbhors")
-    
 
     return parser.parse_args()
 
@@ -136,6 +87,7 @@ if __name__ == "__main__":
     
     training_matrix = ratings_matrix[train_ids, :]
     testing_matrix = ratings_matrix[test_ids, :]
+    true_ratings = testing_matrix.copy()
 
     # impute unknown ratings
     print "Imputing values"
@@ -152,12 +104,13 @@ if __name__ == "__main__":
             
     training_matrix = training_matrix[:, selected_columns]
     testing_matrix = testing_matrix[:, selected_columns]
+    true_ratings = true_ratings[:, selected_columns]
 
     n_remaining_movies = training_matrix.shape[1]
 
     # perform predictions
     print "Performing kNN search"
-    knn = NearestNeighbors(metric=args.metric)
+    knn = NearestNeighbors()
     knn.fit(training_imputed_matrix)
 
     # returns n_test_users x k matrix
@@ -181,16 +134,12 @@ if __name__ == "__main__":
     for user_id in xrange(n_test_users):
         nonzero_ratings = []
         for movie_id in xrange(n_remaining_movies):
-            if testing_matrix[user_id, movie_id] > 0.0:
+            if true_ratings[user_id, movie_id] > 0.0:
                 nonzero_ratings.append(movie_id)
 
-        squared_error += np.sum((testing_matrix[user_id, nonzero_ratings] - predicted_ratings[user_id, nonzero_ratings]) ** 2)
+        squared_error += np.sum((true_ratings[user_id, nonzero_ratings] - predicted_ratings[user_id, nonzero_ratings]) ** 2)
         n += len(nonzero_ratings)
 
     rmse = np.sqrt(squared_error / n)
 
     print "Root Mean-Squared Error:", rmse
-    
-    
-
-    
